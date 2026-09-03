@@ -57,4 +57,4 @@ spec:
         items:
 
           - key: .dockerconfigjson
-            path: config.jsontkn pipelinerun logs -n cicd -f
+            path: config.json

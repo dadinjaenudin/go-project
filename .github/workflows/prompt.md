@@ -70,24 +70,20 @@ Jalan setelah `backend` dan `frontend` hijau. Build kedua image dengan
 
 Tidak ada login registry, jadi job ini aman dijalankan dari PR fork.
 
-### 4. `manifests` — non-blocking
+### 4. `manifests`
 
 Membaca semua path `k8s/...` yang di-apply `deploy.yaml`, lalu memastikan tiap file
-benar-benar ada. Diberi `continue-on-error: true` supaya statusnya jadi peringatan,
-bukan penghalang merge.
+benar-benar ada. Blocking — kalau merah, artinya step deploy Tekton pasti gagal saat
+dijalankan, dan lebih baik ketahuan di PR daripada di tengah rollout.
 
-Job ini saat ini **memang gagal**, dan itu disengaja — ia menangkap bug nyata:
+Job ini sempat merah pada run pertama dan berhasil menangkap bug nyata: `deploy.yaml`
+merujuk `k8s/backend-service.yml`, `k8s/backend-hpa.yml`, dan `k8s/frontend-service.yml`,
+padahal yang ada bernama `.yaml` dan `frontend-service` bahkan hanya ada di root repo.
+Sudah diperbaiki: path di `deploy.yaml` diselaraskan dan `frontend-service.yml`
+dipindah ke `k8s/frontend-service.yaml`.
 
-```
-OK      k8s/backend_deployment.yml
-MISSING k8s/backend-hpa.yml       -> yang ada k8s/backend-hpa.yaml
-MISSING k8s/backend-service.yml   -> yang ada k8s/backend-service.yaml
-OK      k8s/frontend_deployment.yml
-MISSING k8s/frontend-service.yml  -> hanya ada di root repo
-```
-
-Begitu `deploy.yaml` atau nama file di `k8s/` diselaraskan, job ini hijau dan
-`continue-on-error` boleh dihapus supaya jadi blocking.
+Kalau menambah manifest baru, cukup `kubectl apply -f k8s/<file>` di `deploy.yaml` —
+job ini otomatis ikut memeriksanya tanpa perlu diubah.
 
 ## Batasan yang harus dijaga
 

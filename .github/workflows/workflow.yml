@@ -102,14 +102,14 @@ jobs:
         run: docker build -f ui/Dockerfile-vue -t go-project_frontend:ci ui
 
   # ==========================================
-  # MANIFEST - non-blocking. Memverifikasi
-  # setiap path k8s/ yang di-apply deploy.yaml
-  # benar-benar ada di repo.
+  # MANIFEST - memverifikasi setiap path k8s/
+  # yang di-apply deploy.yaml benar-benar ada
+  # di repo, sebelum Tekton menemukannya di
+  # tengah deploy.
   # ==========================================
   manifests:
-    name: Manifest paths (non-blocking)
+    name: Manifest paths
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4

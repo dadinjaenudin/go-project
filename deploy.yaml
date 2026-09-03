@@ -75,11 +75,11 @@ spec:
           -n cicd
 
         kubectl apply \
-          -f k8s/backend-service.yml \
+          -f k8s/backend-service.yaml \
           -n cicd
 
         kubectl apply \
-          -f k8s/backend-hpa.yml \
+          -f k8s/backend-hpa.yaml \
           -n cicd
 
         echo ""
@@ -92,7 +92,7 @@ spec:
           -n cicd
 
         kubectl apply \
-          -f k8s/frontend-service.yml \
+          -f k8s/frontend-service.yaml \
           -n cicd
 
         echo ""

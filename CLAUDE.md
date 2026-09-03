@@ -42,7 +42,7 @@ docker build -f Dockerfile-go -t go-project_backend .
 
 `.github/workflows/workflow.yml` berjalan pada push/PR ke `main`: `go vet`+`go test`+build binary, `npm ci`+`npm run build`, lalu `docker build` kedua image **tanpa push**. Tidak memakai satu pun secret — push image dan apply manifest tetap tugas Tekton.
 
-Spesifikasi lengkap beserta alasan tiap langkah ada di `.github/workflows/prompt.md`; ubah dokumen itu lebih dulu kalau workflow-nya diubah. Job `manifests` sengaja `continue-on-error` dan saat ini merah — ia mendeteksi nama file yang salah di `deploy.yaml` (lihat bagian bawah).
+Spesifikasi lengkap beserta alasan tiap langkah ada di `.github/workflows/prompt.md`; ubah dokumen itu lebih dulu kalau workflow-nya diubah. Job `manifests` memverifikasi tiap path `k8s/...` yang di-apply `deploy.yaml` benar-benar ada — kalau merah, step deploy Tekton pasti gagal.
 
 ### Tekton / Kubernetes
 
@@ -74,9 +74,9 @@ Task build butuh Secret `dockerhub-secret` (tipe `kubernetes.io/dockerconfigjson
 ## Hal yang perlu diketahui sebelum mengubah
 
 - **`myComponent.vue` hardcode `http://localhost:8888/api/data`.** Ini melewati proxy Vite dan pasti gagal di Kubernetes (backend di sana adalah Service ClusterIP `employee-backend:8888`). Pakai path relatif `/api/data` bila menyentuh bagian ini.
-- **`deploy.yaml` merujuk nama file yang tidak ada.** Task itu apply `k8s/backend-service.yml`, `k8s/backend-hpa.yml`, dan `k8s/frontend-service.yml`, padahal yang ada `k8s/backend-service.yaml`, `k8s/backend-hpa.yaml`, dan frontend service hanya ada di root sebagai `frontend-service.yml`. Step deploy akan gagal sampai nama/lokasi disamakan.
-- **`frontend-build.yaml` baris terakhir korup:** `path: config.jsontkn pipelinerun logs -n cicd -f` — teks perintah shell tidak sengaja tertempel. Seharusnya `path: config.json`, jika tidak mount kredensial Kaniko salah.
-- **Manifest k8s terduplikasi persis di root repo** (`backend_deployment.yml`, `backend-hpa.yaml`, `backend-service.yaml`, `frontend_deployment.yml` identik dengan salinannya di `k8s/`). Hanya salinan `k8s/` yang dibaca `deploy.yaml`; edit keduanya atau hapus yang di root agar tidak divergen.
+- **Semua manifest yang di-apply `deploy.yaml` wajib ada di `k8s/`.** Dulu task ini merujuk tiga file dengan nama salah (`.yml` vs `.yaml`, dan `frontend-service` yang hanya ada di root); sudah diperbaiki dan sekarang dijaga job `manifests` di CI. Saat menambah manifest, taruh di `k8s/` dan pakai nama persis seperti di `deploy.yaml`.
+- **Kedua task Kaniko me-mount Secret `dockerhub-secret` sebagai `config.json`.** `backend-build.yaml` dan `frontend-build.yaml` harus identik di blok `volumes` — pernah ada regresi di sini (teks perintah shell tertempel ke nilai `path`) yang membuat push image frontend gagal autentikasi.
+- **Tata letak YAML: root hanya untuk Tekton + compose, `k8s/` hanya untuk manifest aplikasi.** Salinan manifest yang dulu menganggur di root sudah dihapus; jangan hidupkan lagi — `deploy.yaml` hanya membaca `k8s/`, sehingga salinan root pasti divergen tanpa ketahuan.
 - **Dua definisi RBAC yang tumpang tindih:** `rbac.yaml` (ClusterRole) dan `deploy-rbac.yml` (Role namespaced), keduanya membuat ServiceAccount `tekton-deployer` yang sama. Pilih salah satu; `pipelinerun.yaml` hanya butuh SA tersebut ada.
 - **`backend_deployment.yml` me-mount ConfigMap `employee-data` ke `/app/data`,** tapi tidak ada manifest yang membuatnya. Buat manual: `kubectl create configmap employee-data --from-file=data/data_master_karyawan.csv -n cicd`, kalau tidak pod backend tidak akan start.
 - File kosong/artefak yang bisa diabaikan: `a`, `pipeline.yml`, `tasks.yml` (semua 0 byte), dan `main.exe` (binary hasil build yang ikut ter-commit).
