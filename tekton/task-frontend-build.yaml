@@ -1,0 +1,51 @@
+apiVersion: tekton.dev/v1
+kind: Task
+
+metadata:
+  name: frontend-build-push
+  namespace: cicd
+
+spec:
+  description: Build image frontend (Vue -> nginx) dengan Kaniko lalu push ke Docker Hub.
+
+  params:
+    - name: IMAGE
+      type: string
+      description: Repositori image, mis. dadin/go-frontend
+
+    - name: TAG
+      type: string
+
+  workspaces:
+    - name: source
+
+  results:
+    - name: digest
+      description: Digest image hasil push
+
+  steps:
+    - name: build-push
+      image: gcr.io/kaniko-project/executor:v1.23.2
+
+      # Context-nya folder ui/ karena Dockerfile frontend menyalin package.json
+      # dan nginx.conf dengan path relatif terhadap folder itu.
+      args:
+        - --dockerfile=$(workspaces.source.path)/ui/Dockerfile
+        - --context=$(workspaces.source.path)/ui
+        - --destination=docker.io/$(params.IMAGE):$(params.TAG)
+        - --destination=docker.io/$(params.IMAGE):latest
+        - --digest-file=$(results.digest.path)
+        - --cache=true
+        - --cache-ttl=24h
+
+      volumeMounts:
+        - name: docker-config
+          mountPath: /kaniko/.docker
+
+  volumes:
+    - name: docker-config
+      secret:
+        secretName: dockerhub-secret
+        items:
+          - key: .dockerconfigjson
+            path: config.json

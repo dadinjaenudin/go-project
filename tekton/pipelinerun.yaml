@@ -1,0 +1,42 @@
+# Jalankan dengan "kubectl create" (bukan apply) karena memakai generateName.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+
+metadata:
+  generateName: employee-ci-cd-
+  namespace: cicd
+
+spec:
+  pipelineRef:
+    name: employee-ci-cd
+
+  taskRunTemplate:
+    serviceAccountName: tekton-deployer
+
+  timeouts:
+    pipeline: "1h"
+
+  params:
+    - name: repo-url
+      value: https://github.com/dadinjaenudin/go-project.git
+
+    - name: revision
+      value: main
+
+    - name: backend-image
+      value: dadin/go-backend
+
+    - name: frontend-image
+      value: dadin/go-frontend
+
+    - name: deploy-namespace
+      value: dev
+
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi

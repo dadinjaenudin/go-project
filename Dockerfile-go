@@ -1,0 +1,40 @@
+# ==========================================
+# Image backend — API Go/Echo saja.
+# Frontend dibangun terpisah (ui/Dockerfile).
+# ==========================================
+
+FROM golang:1.27-alpine AS builder
+
+WORKDIR /app
+
+# Layer dependency dipisah agar cache tidak batal setiap kali source berubah.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY main.go ./
+
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server main.go
+
+
+# ==========================================
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates wget \
+    && adduser -D -u 10001 app
+
+WORKDIR /app
+
+COPY --from=builder /out/server ./server
+
+# CSV adalah satu-satunya sumber data dan dibaca ulang tiap request, jadi
+# ikut dibakar ke image. Tidak perlu ConfigMap terpisah di Kubernetes.
+COPY data ./data
+
+USER app
+
+EXPOSE 8888
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+    CMD wget -qO- http://127.0.0.1:8888/api/health || exit 1
+
+CMD ["./server"]

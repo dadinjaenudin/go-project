@@ -4,79 +4,104 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Ringkasan
 
-Aplikasi "Data Master Karyawan": backend Go (Echo) yang membaca CSV dan mengeksposnya sebagai JSON, plus frontend Vue 3 (Vite) yang menampilkannya dalam tabel dengan search + filter. Tidak ada database — sumber data satu-satunya adalah `data/data_master_karyawan.csv`, dibaca ulang setiap request ke `/api/data`.
+Aplikasi "Data Master Karyawan": backend Go (Echo v4) membaca satu file CSV dan mengeksposnya sebagai JSON, frontend Vue 3 menampilkannya sebagai tabel dengan search, filter gender, dan ringkasan statistik. Tidak ada database — `data/data_master_karyawan.csv` dibaca ulang dari disk setiap kali `/api/data` dipanggil. Endpoint hanya `/api/data` dan `/api/health`.
 
-Seluruh sisa repo (Dockerfile, docker-compose, manifest k8s, Task/Pipeline Tekton) adalah pipeline CI/CD ke Minikube namespace `cicd`.
+Deployment-nya **dua image terpisah**: backend Go, dan frontend Vue yang di-build statis lalu disajikan nginx. nginx yang mem-proxy `/api/` ke Service backend.
 
 ## Perintah
 
-### Development lokal
-
 ```bash
-# Backend (butuh Go 1.27 sesuai go.mod; saat ini belum terpasang di PATH mesin ini)
-go run main.go            # listen di :8888
+# Backend — listen di :8888 (butuh Go 1.27; tidak terpasang di mesin ini, pakai Docker)
+go run main.go
+go vet ./...
+go test ./... -v
 
-# Frontend (dari folder ui/)
-cd ui && npm install && npm run dev     # Vite dev server di :5173
+# Tanpa Go lokal — jalankan di container yang sama dengan Tekton:
+docker run --rm -v "D:\MY-Project\go-project:/src" -w /src golang:1.27-alpine \
+  sh -c "go vet ./... && go test ./... -count=1"
+
+# Frontend — dari folder ui/
+npm install
+npm run dev            # Vite dev server :5173, mem-proxy /api ke :8888
+npm test               # vitest run
+npm run test:watch
+npm run build          # -> ui/dist
+
+# Image
+docker build -f Dockerfile-go -t dadin/go-backend:v1 .
+docker build -f ui/Dockerfile -t dadin/go-frontend:v1 ui    # context-nya ui/, bukan root
 ```
 
-Jalankan keduanya bersamaan untuk development: Vite mem-proxy `/api` ke `localhost:8888` (lihat `ui/vite.config.js`).
-
-### Test
-
-```bash
-go test ./...   # belum ada file _test.go sama sekali — selalu lolos kosong
-go vet ./...    # dua perintah ini yang dipakai Tekton task backend-test
-```
-
-`ui/package.json` tidak punya script `test`, jadi `npm test` gagal. Task `frontend-test.yaml` memanggilnya, tapi task itu **tidak** dirangkai di `pipeline.yaml` sehingga tidak pernah jalan.
-
-### Docker
-
-```bash
-docker compose up --build      # backend :8888 + frontend dev server :5173
-docker build -f Dockerfile-go -t go-project_backend .
-```
-
-### CI GitHub Actions
-
-`.github/workflows/workflow.yml` berjalan pada push/PR ke `main`: `go vet`+`go test`+build binary, `npm ci`+`npm run build`, lalu `docker build` kedua image **tanpa push**. Tidak memakai satu pun secret — push image dan apply manifest tetap tugas Tekton.
-
-Spesifikasi lengkap beserta alasan tiap langkah ada di `.github/workflows/prompt.md`; ubah dokumen itu lebih dulu kalau workflow-nya diubah. Job `manifests` memverifikasi tiap path `k8s/...` yang di-apply `deploy.yaml` benar-benar ada — kalau merah, step deploy Tekton pasti gagal.
-
-### Tekton / Kubernetes
-
-Semua resource ada di namespace `cicd`. Urutan apply saat setup dari nol:
-
-```bash
-kubectl create namespace cicd
-kubectl apply -f rbac.yaml            # ServiceAccount tekton-deployer + ClusterRole
-kubectl apply -f workspace.yaml       # PVC shared-workspace
-kubectl apply -f backend-test.yaml -f backend-build.yaml -f frontend-build.yaml -f deploy.yaml
-kubectl apply -f pipeline.yaml
-kubectl create -f pipelinerun.yaml    # create, bukan apply — pakai generateName
-
-tkn pipelinerun logs -n cicd -f       # ikuti log run terakhir
-```
-
-Task build butuh Secret `dockerhub-secret` (tipe `kubernetes.io/dockerconfigjson`) di namespace `cicd`; Kaniko push ke Docker Hub `aripribadi010187/go-project_{backend,frontend}`.
+Development normal: `go run main.go` + `npm run dev`, lalu buka **:5173**.
 
 ## Arsitektur
 
-**Alur data:** CSV → `readCSV()` di `main.go` mengubah tiap baris jadi `map[string]string` berkunci header CSV (`NP`, `Nama`, `Unit Kerja`, `Jabatan`, `Gaji`, `Umur`, `Jenis Kelamin`) → `/api/data` mengembalikan `{"data": [...]}` → `ui/src/components/myComponent.vue` merender langsung dari kunci-kunci itu. **Mengubah header di CSV akan memutus template Vue** karena diakses lewat nama kolom literal (mis. `employee["Unit Kerja"]`). Endpoint lain hanya `/api/health`.
+```
+data/data_master_karyawan.csv
+  → readCSV() di main.go — tiap baris jadi map[string]string berkunci header CSV
+  → GET /api/data mengembalikan {"data": [...]}
+  → ui/src/components/myComponent.vue merender lewat nama kolom literal
+```
 
-**Semua logika frontend ada di `ui/src/components/myComponent.vue`** (~465 baris: template, Options-API `setup()`, dan style). `App.vue` hanya me-render komponen itu; `HelloWorld.vue` sisa scaffold Vite dan tidak dipakai.
+Kunci map berasal langsung dari baris header CSV (`NP`, `Nama`, `Unit Kerja`, `Jabatan`, `Gaji`, `Umur`, `Jenis Kelamin`), dan template Vue mengaksesnya dengan nama persis itu (`employee["Unit Kerja"]`). **Mengubah nama header CSV akan mengosongkan kolom di frontend tanpa error di mana pun.** `TestReadCSVDataAsli` di `main_test.go` menjaga ini — test itu gagal kalau ada kolom yang hilang.
 
-**Dua mode penyajian frontend yang saling bertentangan:**
-1. `docker-compose.yml` dan manifest k8s menjalankan frontend sebagai container Vite **dev server** terpisah (`ui/Dockerfile-vue`, port 5173).
-2. `Dockerfile-go` (stage 1) mem-build Vue dan menyalin hasilnya ke `./ui/dist` di image backend — tapi `main.go` memanggil `e.Static("/", "ui")`, bukan `"ui/dist"`, jadi build itu tidak pernah tersaji. Kalau ingin single-image deployment, ubah path static ke `ui/dist`.
+**Seluruh logika frontend ada di satu file:** `ui/src/components/myComponent.vue` (465 baris — template, Options-API `setup()`, dan `<style>`). `App.vue` hanya me-render komponen itu, dan masih meng-import `HelloWorld.vue` (sisa scaffold Vite) tanpa memakainya.
 
-## Hal yang perlu diketahui sebelum mengubah
+**Frontend memanggil `/api/data` relatif, bukan URL absolut.** Yang menyambungkannya ke backend berbeda per lingkungan:
 
-- **`myComponent.vue` hardcode `http://localhost:8888/api/data`.** Ini melewati proxy Vite dan pasti gagal di Kubernetes (backend di sana adalah Service ClusterIP `employee-backend:8888`). Pakai path relatif `/api/data` bila menyentuh bagian ini.
-- **Semua manifest yang di-apply `deploy.yaml` wajib ada di `k8s/`.** Dulu task ini merujuk tiga file dengan nama salah (`.yml` vs `.yaml`, dan `frontend-service` yang hanya ada di root); sudah diperbaiki dan sekarang dijaga job `manifests` di CI. Saat menambah manifest, taruh di `k8s/` dan pakai nama persis seperti di `deploy.yaml`.
-- **Kedua task Kaniko me-mount Secret `dockerhub-secret` sebagai `config.json`.** `backend-build.yaml` dan `frontend-build.yaml` harus identik di blok `volumes` — pernah ada regresi di sini (teks perintah shell tertempel ke nilai `path`) yang membuat push image frontend gagal autentikasi.
-- **Tata letak YAML: root hanya untuk Tekton + compose, `k8s/` hanya untuk manifest aplikasi.** Salinan manifest yang dulu menganggur di root sudah dihapus; jangan hidupkan lagi — `deploy.yaml` hanya membaca `k8s/`, sehingga salinan root pasti divergen tanpa ketahuan.
-- **Dua definisi RBAC yang tumpang tindih:** `rbac.yaml` (ClusterRole) dan `deploy-rbac.yml` (Role namespaced), keduanya membuat ServiceAccount `tekton-deployer` yang sama. Pilih salah satu; `pipelinerun.yaml` hanya butuh SA tersebut ada.
-- **`backend_deployment.yml` me-mount ConfigMap `employee-data` ke `/app/data`,** tapi tidak ada manifest yang membuatnya. Buat manual: `kubectl create configmap employee-data --from-file=data/data_master_karyawan.csv -n cicd`, kalau tidak pod backend tidak akan start.
-- File kosong/artefak yang bisa diabaikan: `a`, `pipeline.yml`, `tasks.yml` (semua 0 byte), dan `main.exe` (binary hasil build yang ikut ter-commit).
+| Lingkungan | Penyambung |
+|---|---|
+| `npm run dev` | proxy di `ui/vite.config.js` → `localhost:8888` |
+| Kubernetes | `ui/nginx.conf` → `proxy_pass http://employee-backend:8888` |
+
+Jangan kembalikan ke `http://localhost:8888/...` — itu memutus deployment dan membuat CORS jadi syarat.
+
+## CI/CD (Tekton)
+
+Semua di `tekton/`. Resource pipeline hidup di namespace **`cicd`**, aplikasi dideploy ke namespace **`dev`**.
+
+```
+clone → (backend-test ‖ frontend-test) → (backend-build ‖ frontend-build) → deploy
+```
+
+Kedua build sengaja menunggu **kedua** test hijau, supaya image tidak terlanjur ter-push saat satu sisi gagal.
+
+```powershell
+# Windows / PowerShell
+powershell -ExecutionPolicy Bypass -File tekton\setup.ps1
+kubectl create -f tekton\pipelinerun.yaml   # create, bukan apply — pakai generateName
+tkn pipelinerun logs -n cicd --last -f
+```
+
+```bash
+# Git Bash — sama persis, hanya beda script
+bash tekton/setup.sh
+kubectl create -f tekton/pipelinerun.yaml
+```
+
+Aplikasi terbuka di **<http://localhost:8090>**.
+
+### Lingkungan: Docker Desktop di Windows, bukan Minikube
+
+Cluster-nya Kubernetes bawaan **Docker Desktop** — context `docker-desktop`, node tunggal `desktop-control-plane`, berjalan di WSL2. Perintah `minikube ...` tidak berlaku di sini.
+
+- **NodePort tidak bisa diakses dari Windows.** `http://localhost:30080` ditolak (connection refused). Yang diteruskan Docker Desktop ke host hanyalah Service bertipe **LoadBalancer**, lewat proses `com.docker.backend` + `wslrelay`. Karena itu `k8s/frontend-service.yaml` bertipe `LoadBalancer` di port **8090**, bukan NodePort. Jangan diubah ke NodePort kalau targetnya tetap Docker Desktop.
+- **Mengubah `port` pada Service LoadBalancer yang sudah ada tidak mem-bind ulang listener di host.** Service-nya harus dihapus dulu: `kubectl delete svc -n dev employee-frontend` lalu `kubectl apply -f k8s/frontend-service.yaml`. Tanpa itu port lama tetap mati dan port baru tidak pernah terbuka.
+- **Docker Desktop berbagi image store dengan cluster.** Image hasil `docker build` di Windows langsung terlihat oleh kubelet, jadi manifest bisa diuji tanpa push ke Docker Hub sama sekali — cukup `kubectl set image` ke tag lokal. Berguna untuk memisahkan masalah manifest dari masalah registry.
+- Storage class default `standard` (rancher.io/local-path, `WaitForFirstConsumer`). PVC `ReadWriteOnce` 5Gi dari `volumeClaimTemplate` di PipelineRun jalan normal di node tunggal.
+
+Hal yang perlu diketahui:
+
+- **Tag image adalah SHA commit, bukan tag statis.** Ini disengaja: dengan tag tetap seperti `v1`, `kubectl set image` menulis nilai yang identik dengan yang sudah terpasang, Deployment tidak berubah, rollout tidak pernah jalan, dan pipeline **melaporkan sukses sambil tetap menjalankan kode lama**. Task `git-clone` mengeluarkan result `commit-short` yang dipakai kedua build dan task deploy.
+- **`secret.md` berisi Docker Hub access token dan ada di `.gitignore`. Jangan pernah menyalin isinya ke file lain.** `tekton/setup.sh` membacanya dan membuat Secret `dockerhub-secret` di namespace `cicd`; rotasi token cukup dengan mengubah `secret.md` lalu menjalankan ulang script itu.
+- **RBAC-nya Role namespaced, bukan ClusterRole.** ServiceAccount `tekton-deployer` ada di `cicd`, Role + RoleBinding-nya di `dev`. Verifikasi setelah mengubah: `kubectl auth can-i create deployments.apps -n dev --as=system:serviceaccount:cicd:tekton-deployer` harus `yes`, dan `-n default` harus `no`.
+- **Task deploy meng-apply backend lebih dulu.** nginx me-resolve `employee-backend` saat load config, jadi Service backend harus sudah ada sebelum pod frontend start. Jangan tukar urutannya di `tekton/task-deploy.yaml`.
+- **Tag image di `k8s/*-deployment.yaml` hanya placeholder** (`:latest`); tag sebenarnya dipasang task deploy lewat `kubectl set image`.
+- **CSV dibakar ke dalam image backend** (`COPY data ./data`). Tidak ada ConfigMap — kalau CSV berubah, image harus di-build ulang.
+- `git-clone` ditulis sendiri di `tekton/task-git-clone.yaml` supaya repo tidak bergantung pada Tekton Hub.
+
+## Yang perlu diperhatikan
+
+- **CSV asli diawali UTF-8 BOM.** `encoding/csv` tidak membuangnya, jadi `readCSV()` mem-`TrimPrefix` `\ufeff` dari header pertama secara eksplisit. Tanpa itu kunci kolom pertama jadi `"\ufeffNP"` dan `employee.NP` di frontend bernilai `undefined`. Jangan hapus baris itu — dan **jangan tulis karakter BOM literal di source Go**, kompilernya menolak dengan `illegal byte order mark`; pakai escape `\ufeff`.
+- **`prompt.md` adalah catatan permintaan, bukan dokumentasi.** Isinya menyebut frontend "next.js" padahal frontend repo ini Vue. Blok pertamanya (GitHub Actions) belum dikerjakan; blok keduanya (Tekton) sudah.
+- **Branch `fix/ci-manifest-paths` menyimpan setup CI/CD versi lama** (namespace `cicd` untuk segalanya, image `aripribadi010187/*`, frontend berupa container Vite dev server, plus workflow GitHub Actions). Sudah digantikan `tekton/` di `main`; berguna hanya sebagai rujukan.

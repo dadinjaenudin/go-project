@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: employee-frontend
+  namespace: dev
+
+spec:
+  # LoadBalancer, bukan NodePort.
+  #
+  # Kubernetes bawaan Docker Desktop (node "desktop-control-plane") TIDAK
+  # meneruskan NodePort ke localhost — port 30080 ditolak dari Windows.
+  # Yang diteruskan Docker Desktop adalah Service bertipe LoadBalancer,
+  # yang otomatis bind ke localhost. Di cluster non-Docker-Desktop, tipe ini
+  # tetap mengalokasikan nodePort di bawah sebagai cadangan.
+  type: LoadBalancer
+
+  selector:
+    app: employee-frontend
+
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http
+      nodePort: 30080

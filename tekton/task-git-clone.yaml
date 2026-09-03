@@ -1,0 +1,47 @@
+apiVersion: tekton.dev/v1
+kind: Task
+
+metadata:
+  name: git-clone
+  namespace: cicd
+
+spec:
+  description: >-
+    Clone repo ke workspace bersama. Ditulis sendiri agar repo ini tidak
+    bergantung pada task git-clone dari Tekton Hub yang harus di-install terpisah.
+
+  params:
+    - name: url
+      type: string
+
+    - name: revision
+      type: string
+      default: main
+
+  workspaces:
+    - name: output
+
+  results:
+    - name: commit
+      description: SHA commit yang di-checkout
+
+    - name: commit-short
+      description: SHA pendek, dipakai sebagai tag image
+
+  steps:
+    - name: clone
+      image: alpine/git:2.49.1
+      workingDir: $(workspaces.output.path)
+
+      script: |
+        #!/bin/sh
+        set -eu
+
+        # Workspace memakai PVC yang bisa dipakai ulang antar-run.
+        rm -rf ./* ./.[!.]* 2>/dev/null || true
+
+        git clone --depth 1 --branch "$(params.revision)" "$(params.url)" .
+
+        git rev-parse HEAD | tr -d '\n' > "$(results.commit.path)"
+
+        echo "Checked out $(params.revision) @ $(git rev-parse --short HEAD)"

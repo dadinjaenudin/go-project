@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -28,6 +29,13 @@ func readCSV(filename string) ([]map[string]string, error) {
 	headers, err := reader.Read()
 	if err != nil {
 		return nil, err
+	}
+
+	// File CSV yang ditulis Excel/Notepad diawali UTF-8 BOM. encoding/csv tidak
+	// membuangnya, sehingga tanpa baris ini kunci kolom pertama menjadi "\ufeffNP"
+	// dan frontend yang membaca employee.NP mendapat undefined.
+	if len(headers) > 0 {
+		headers[0] = strings.TrimPrefix(headers[0], "\ufeff")
 	}
 
 	var result []map[string]string
@@ -64,8 +72,11 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 
-	// Static website
-	e.Static("/", "ui")
+	// Fallback static bila binary dijalankan sendirian setelah "npm run build".
+	// Di Kubernetes frontend disajikan image nginx terpisah, jadi folder ini
+	// memang tidak ada di dalam image backend dan route-nya cukup 404.
+	// Harus "ui/dist", bukan "ui" — "ui" akan mengekspos source dan node_modules.
+	e.Static("/", "ui/dist")
 
 	// API membaca CSV
 	e.GET("/api/data", func(c echo.Context) error {

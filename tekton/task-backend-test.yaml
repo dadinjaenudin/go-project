@@ -1,0 +1,36 @@
+apiVersion: tekton.dev/v1
+kind: Task
+
+metadata:
+  name: backend-test
+  namespace: cicd
+
+spec:
+  description: Unit test dan static analysis untuk backend Go.
+
+  workspaces:
+    - name: source
+
+  steps:
+    - name: go-test
+      image: golang:1.27-alpine
+      workingDir: $(workspaces.source.path)
+
+      env:
+        - name: GOCACHE
+          value: /workspace/.gocache
+        - name: GOMODCACHE
+          value: /workspace/.gomodcache
+
+      script: |
+        #!/bin/sh
+        set -eu
+
+        echo "=== go mod download ==="
+        go mod download
+
+        echo "=== go vet ==="
+        go vet ./...
+
+        echo "=== go test ==="
+        go test ./... -v -count=1

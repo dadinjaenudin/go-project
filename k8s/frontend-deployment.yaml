@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: employee-frontend
+  namespace: dev
+  labels:
+    app: employee-frontend
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: employee-frontend
+
+  template:
+    metadata:
+      labels:
+        app: employee-frontend
+
+    spec:
+      containers:
+        - name: frontend
+          # Tag diganti saat deploy oleh task Tekton (kubectl set image).
+          image: dadin/go-frontend:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "300m"
+              memory: "128Mi"

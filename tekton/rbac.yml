@@ -1,0 +1,63 @@
+# ==========================================================================
+# ServiceAccount yang dipakai semua TaskRun, plus izin yang dibutuhkannya.
+#
+# Pipeline berjalan di namespace "cicd", tetapi men-deploy ke namespace "dev".
+# Karena itu izinnya berupa Role di "dev" yang di-bind ke ServiceAccount milik
+# "cicd" — bukan ClusterRole, supaya pipeline tidak bisa menyentuh namespace lain.
+# ==========================================================================
+
+apiVersion: v1
+kind: ServiceAccount
+
+metadata:
+  name: tekton-deployer
+  namespace: cicd
+
+# Catatan: Secret dockerhub-secret TIDAK dipasang sebagai imagePullSecrets di sini.
+# Task Kaniko me-mount-nya sendiri sebagai volume untuk push. Kalau image di Docker
+# Hub dibuat privat, buat secret pull terpisah di namespace dev (tempat pod berjalan).
+
+---
+# Izin di namespace tujuan deploy.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+
+metadata:
+  name: tekton-deployer
+  namespace: dev
+
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+  # Dibutuhkan "kubectl rollout status" dan "kubectl get pods" saat verifikasi.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+
+metadata:
+  name: tekton-deployer
+  namespace: dev
+
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tekton-deployer
+
+subjects:
+  - kind: ServiceAccount
+    name: tekton-deployer
+    namespace: cicd

@@ -1,0 +1,61 @@
+apiVersion: tekton.dev/v1
+kind: Task
+
+metadata:
+  name: deploy-to-dev
+  namespace: cicd
+
+spec:
+  description: Apply manifest ke namespace dev, arahkan ke tag image baru, tunggu rollout.
+
+  params:
+    - name: BACKEND_IMAGE
+      type: string
+
+    - name: FRONTEND_IMAGE
+      type: string
+
+    - name: TAG
+      type: string
+
+    - name: NAMESPACE
+      type: string
+      default: dev
+
+  workspaces:
+    - name: source
+
+  steps:
+    - name: deploy
+      image: bitnami/kubectl:1.34
+      workingDir: $(workspaces.source.path)
+
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        NS="$(params.NAMESPACE)"
+
+        echo "=== Apply manifest backend ==="
+        # Backend lebih dulu: Service employee-backend harus sudah ada sebelum
+        # pod frontend start, karena nginx me-resolve nama itu saat load config.
+        kubectl apply -n "$NS" -f k8s/backend-deployment.yaml
+        kubectl apply -n "$NS" -f k8s/backend-service.yaml
+
+        echo "=== Apply manifest frontend ==="
+        kubectl apply -n "$NS" -f k8s/frontend-deployment.yaml
+        kubectl apply -n "$NS" -f k8s/frontend-service.yaml
+
+        echo "=== Pasang tag image hasil build ==="
+        kubectl set image -n "$NS" deployment/employee-backend \
+          backend=$(params.BACKEND_IMAGE):$(params.TAG)
+
+        kubectl set image -n "$NS" deployment/employee-frontend \
+          frontend=$(params.FRONTEND_IMAGE):$(params.TAG)
+
+        echo "=== Tunggu rollout ==="
+        kubectl rollout status -n "$NS" deployment/employee-backend  --timeout=300s
+        kubectl rollout status -n "$NS" deployment/employee-frontend --timeout=300s
+
+        echo "=== Hasil ==="
+        kubectl get deployments,svc,pods -n "$NS"

@@ -1,0 +1,39 @@
+apiVersion: tekton.dev/v1
+kind: Task
+
+metadata:
+  name: frontend-test
+  namespace: cicd
+
+spec:
+  description: Unit test Vitest untuk frontend Vue.
+
+  workspaces:
+    - name: source
+
+  steps:
+    - name: npm-test
+      image: node:22-alpine
+      workingDir: $(workspaces.source.path)/ui
+
+      env:
+        - name: HOME
+          value: /tmp
+        - name: npm_config_cache
+          value: /tmp/.npm
+        # Vitest butuh CI=true agar tidak masuk watch mode.
+        - name: CI
+          value: "true"
+
+      script: |
+        #!/bin/sh
+        set -eu
+
+        echo "=== npm ci ==="
+        npm ci --no-audit --no-fund
+
+        echo "=== npm test (vitest run) ==="
+        npm test
+
+        echo "=== npm run build ==="
+        npm run build

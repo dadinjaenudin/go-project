@@ -1,0 +1,126 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+
+metadata:
+  name: employee-ci-cd
+  namespace: cicd
+
+spec:
+  description: >-
+    clone -> (test backend | test frontend) -> (build+push backend | build+push
+    frontend) -> deploy ke namespace dev.
+
+    Kedua build sengaja menunggu KEDUA test hijau: image tidak boleh terlanjur
+    masuk Docker Hub kalau salah satu sisi gagal.
+
+    Tag image = SHA commit, bukan tag statis. Dengan tag tetap seperti "v1",
+    "kubectl set image" menulis nilai yang sama persis dengan yang sudah
+    terpasang, sehingga Deployment tidak berubah, rollout tidak pernah jalan,
+    dan pipeline tetap melaporkan sukses sambil menjalankan kode lama.
+
+  params:
+    - name: repo-url
+      type: string
+
+    - name: revision
+      type: string
+      default: main
+
+    - name: backend-image
+      type: string
+      default: dadin/go-backend
+
+    - name: frontend-image
+      type: string
+      default: dadin/go-frontend
+
+    - name: deploy-namespace
+      type: string
+      default: dev
+
+  workspaces:
+    - name: shared-workspace
+
+  results:
+    - name: backend-digest
+      value: $(tasks.backend-build.results.digest)
+
+    - name: frontend-digest
+      value: $(tasks.frontend-build.results.digest)
+
+  tasks:
+
+    # ---------- 1. CLONE ----------
+    - name: clone
+      taskRef:
+        name: git-clone
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+
+    # ---------- 2. TEST (paralel) ----------
+    - name: backend-test
+      runAfter: [clone]
+      taskRef:
+        name: backend-test
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: frontend-test
+      runAfter: [clone]
+      taskRef:
+        name: frontend-test
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ---------- 3. BUILD + PUSH (paralel) ----------
+    - name: backend-build
+      runAfter: [backend-test, frontend-test]
+      taskRef:
+        name: backend-build-push
+      params:
+        - name: IMAGE
+          value: $(params.backend-image)
+        - name: TAG
+          value: $(tasks.clone.results.commit-short)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: frontend-build
+      runAfter: [backend-test, frontend-test]
+      taskRef:
+        name: frontend-build-push
+      params:
+        - name: IMAGE
+          value: $(params.frontend-image)
+        - name: TAG
+          value: $(tasks.clone.results.commit-short)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ---------- 4. DEPLOY ----------
+    - name: deploy
+      runAfter: [backend-build, frontend-build]
+      taskRef:
+        name: deploy-to-dev
+      params:
+        - name: BACKEND_IMAGE
+          value: $(params.backend-image)
+        - name: FRONTEND_IMAGE
+          value: $(params.frontend-image)
+        - name: TAG
+          value: $(tasks.clone.results.commit-short)
+        - name: NAMESPACE
+          value: $(params.deploy-namespace)
+      workspaces:
+        - name: source
+          workspace: shared-workspace

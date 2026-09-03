@@ -1,0 +1,18 @@
+# Kredensial — JANGAN pernah di-commit
+secret.md
+*.secret
+.env
+.env.*
+
+# Artefak build Go
+main.exe
+server
+/go-project
+
+# Node
+node_modules/
+ui/dist/
+
+# Editor
+.vscode/
+.idea/

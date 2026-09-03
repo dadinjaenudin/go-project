@@ -134,7 +134,7 @@ export default {
       error.value = "";
 
       try {
-        const response = await axios.get("http://localhost:8888/api/data")
+        const response = await axios.get("/api/data");
 
         data.value = response.data.data || [];
 
