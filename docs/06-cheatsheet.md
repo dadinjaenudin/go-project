@@ -227,6 +227,20 @@ curl.exe -s http://localhost:8090/api/health
 
 ---
 
+## Cek status deploy (paling sering dipakai)
+
+```
+.\cek.cmd            cek sekali
+.\cek.cmd -Watch     pantau sampai pipeline selesai
+.\cek.cmd -Fetch     ambil dulu keadaan terbaru dari GitHub
+```
+
+Menampilkan: commit lokal vs GitHub, log trigger terakhir, status tiap task
+pipeline beserta durasinya, image yang sedang jalan, kesiapan pod, respons HTTP
+aplikasi, dan satu baris kesimpulan.
+
+---
+
 ## Alur lengkap satu siklus
 
 ```powershell

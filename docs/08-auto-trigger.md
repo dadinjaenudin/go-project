@@ -324,7 +324,115 @@ git show 23c7bbf
 
 ---
 
-## 8.9 Troubleshooting
+## 8.9 "Sudah push tapi tidak berubah"
+
+Keluhan paling sering. **Cara tercepat menjawabnya adalah satu perintah:**
+
+```
+.\cek.cmd            (Command Prompt)
+.\cek.cmd -Watch     (pantau sampai pipeline selesai)
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tekton\status.ps1
+powershell -ExecutionPolicy Bypass -File tekton\status.ps1 -Watch
+```
+
+Script itu memeriksa seluruh rantai dan memberi satu kesimpulan:
+
+```
+  3. PIPELINE
+    run     : employee-ci-cd-auto-lntq5
+    commit  : 1a909c3  <- commit Anda
+    status  : Succeeded (136s)
+
+      [ok]   clone            10s
+      [ok]   backend-test     23s
+      [ok]   frontend-test    19s
+      [ok]   backend-build    75s
+      [ok]   frontend-build   56s
+      [ok]   deploy           28s
+
+  4. YANG JALAN DI KUBERNETES
+    employee-backend     dadin/go-backend:1a909c3     1/1
+    employee-frontend    dadin/go-frontend:1a909c3    1/1
+
+  KESIMPULAN
+    BERHASIL - commit 1a909c3 sudah jalan dan aplikasi menjawab.
+```
+
+Kesimpulannya membedakan enam keadaan: belum di-push, pipeline masih berjalan
+(beserta tahap yang sedang dikerjakan), pipeline gagal (beserta perintah untuk
+melihat lognya), image belum mendarat, pod belum siap, dan berhasil.
+
+Kalau ingin memahami apa yang diperiksanya, tiga bagian di bawah menjelaskan
+penyebab yang mungkin — periksa berurutan.
+
+### 1. Pipeline-nya masih berjalan
+
+Ini penyebab tersering. Satu siklus penuh butuh **sekitar 3 menit**:
+
+| Tahap | Perkiraan |
+|---|---|
+| hook menunggu commit sampai di GitHub | 2-10 dtk |
+| clone + kedua test | ~40 dtk |
+| kedua build image + push ke Docker Hub | ~60-90 dtk |
+| deploy + rollout | ~30 dtk |
+
+Melihat browser 1 menit setelah push pasti masih menampilkan versi lama.
+
+```powershell
+kubectl get pipelinerun -n cicd --sort-by=.metadata.creationTimestamp
+# kolom SUCCEEDED harus True, bukan Unknown/Running
+```
+
+### 2. Perubahan sudah ter-deploy, tapi browser menyimpan yang lama
+
+Bandingkan tag image yang jalan dengan commit terakhir Anda:
+
+```powershell
+git rev-parse --short HEAD
+kubectl get deploy -n dev -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image'
+```
+
+Kalau tag-nya **sama** dengan commit Anda, servernya sudah benar dan sisanya urusan browser. Buktikan tanpa browser:
+
+```powershell
+$html = (curl.exe -s http://localhost:8090/) -join "`n"
+$bundle = [regex]::Match($html, 'src="([^"]+\.js)"').Groups[1].Value
+$js = (curl.exe -s "http://localhost:8090$bundle") -join "`n"
+$js.Contains("teks baru Anda")     # True = server sudah menyajikan versi baru
+```
+
+Kalau hasilnya `True` tapi browser tetap lama, muat ulang paksa: **Ctrl+Shift+R**.
+
+> `ui/nginx.conf` sudah mengirim `Cache-Control: no-cache` untuk `index.html`, jadi masalah ini seharusnya tidak muncul lagi. Nginx tanpa pengaturan itu **tidak mengirim `Cache-Control` sama sekali**, dan browser memakai heuristiknya sendiri — bisa menahan `index.html` lama yang menunjuk nama bundle yang sudah tidak ada.
+
+### 3. Pipeline tidak pernah dipicu
+
+```powershell
+Get-Content .git	ekton-trigger.log -Tail 5
+```
+
+| Isi log | Artinya |
+|---|---|
+| `http=202` | terkirim, lanjut ke bagian 8.10 |
+| `GAGAL: setelah 90s...` | push gagal atau ditolak GitHub, jadi commit tidak pernah sampai |
+| tidak ada baris baru | hook tidak jalan -- cek `git config core.hooksPath` |
+
+> Baris `GAGAL: setelah 90s` benar-benar muncul saat push diblokir GitHub Push Protection (bab 5 kasus #11). Hook menunggu commit yang tidak pernah sampai, lalu menyerah — dan itu perilaku yang benar: lebih baik tidak menjalankan pipeline daripada menjalankannya dengan kode lama.
+
+### Cara tercepat memastikan
+
+```powershell
+# Commit Anda vs yang jalan di cluster -- harus sama
+git rev-parse --short HEAD
+kubectl get deploy employee-frontend -n dev -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+---
+
+## 8.10 Troubleshooting
 
 ### Hook tidak jalan sama sekali saat push
 
