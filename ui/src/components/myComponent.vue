@@ -2,7 +2,7 @@
   <div class="app">
     <header class="header">
       <div>
-        <h1>Data Master Karyawan PROD</h1>
+        <h1>Data Master Karyawan PROD 1</h1>
         <p>Data karyawan dari Web Service Golang</p>
       </div>
 
