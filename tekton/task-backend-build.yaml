@@ -33,8 +33,10 @@ spec:
         - --destination=docker.io/$(params.IMAGE):$(params.TAG)
         - --destination=docker.io/$(params.IMAGE):latest
         - --digest-file=$(results.digest.path)
-        - --cache=true
-        - --cache-ttl=24h
+        # --cache sengaja TIDAK dipakai: Kaniko mendorong cache ke repo bersarang
+        # (dadin/go-<x>/cache) yang tidak didukung Docker Hub, selalu balas 401.
+        # push-retry menutup error TLS transien lewat jaringan WSL2.
+        - --push-retry=3
 
       volumeMounts:
         - name: docker-config

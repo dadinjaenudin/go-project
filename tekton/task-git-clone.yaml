@@ -43,5 +43,6 @@ spec:
         git clone --depth 1 --branch "$(params.revision)" "$(params.url)" .
 
         git rev-parse HEAD | tr -d '\n' > "$(results.commit.path)"
+        git rev-parse --short=7 HEAD | tr -d '\n' > "$(results.commit-short.path)"
 
         echo "Checked out $(params.revision) @ $(git rev-parse --short HEAD)"
