@@ -8,6 +8,13 @@ Aplikasi "Data Master Karyawan": backend Go (Echo v4) membaca satu file CSV dan 
 
 Deployment-nya **dua image terpisah**: backend Go, dan frontend Vue yang di-build statis lalu disajikan nginx. nginx yang mem-proxy `/api/` ke Service backend.
 
+## Dokumentasi
+
+Panduan belajar lengkap untuk pemula ada di **[`docs/`](docs/README.md)** — 7 bab
+berurutan: konsep dasar, setup dari nol, anatomi tiap file, alur pipeline detik
+per detik, 10 kasus troubleshooting nyata, cheatsheet, dan 10 latihan. Semua
+contoh perintahnya sudah diuji di lingkungan ini (Windows + Docker Desktop).
+
 ## Perintah
 
 ```bash
@@ -99,6 +106,26 @@ Hal yang perlu diketahui:
 - **Tag image di `k8s/*-deployment.yaml` hanya placeholder** (`:latest`); tag sebenarnya dipasang task deploy lewat `kubectl set image`.
 - **CSV dibakar ke dalam image backend** (`COPY data ./data`). Tidak ada ConfigMap — kalau CSV berubah, image harus di-build ulang.
 - `git-clone` ditulis sendiri di `tekton/task-git-clone.yaml` supaya repo tidak bergantung pada Tekton Hub.
+
+### Trigger otomatis saat push
+
+`tekton/triggers/` berisi EventListener + TriggerBinding + TriggerTemplate, dan
+`githooks/pre-push` yang memicunya. Dipasang dengan `tekton/setup-triggers.ps1`.
+
+- **Token webhook ada di `webhook-secret.txt`** (ter-`.gitignore`, seperti `secret.md`).
+  Ditulis **tanpa newline** — satu byte tambahan membuat HMAC tidak cocok dan semua
+  request ditolak tanpa pesan yang jelas.
+- **EventListener selalu membalas HTTP 202**, termasuk untuk request yang ditolak
+  interceptor. Jangan menilai keberhasilan dari kode HTTP; periksa
+  `kubectl get pipelinerun -n cicd -l trigger=github-push`.
+- **`git-revision` yang dikirim harus nama branch, bukan SHA.** Task `git-clone`
+  memakai `git clone --branch`, yang menolak commit SHA. Pemotongan
+  `refs/heads/main` → `main` dilakukan interceptor CEL lewat `overlays`.
+- **Hook `pre-push` menunggu di latar sampai GitHub benar-benar punya commit-nya**
+  (dicek dengan `git ls-remote`) sebelum mengirim webhook. Git tidak punya hook
+  `post-push`; mengirim langsung membuat pipeline meng-clone commit sebelumnya.
+- RBAC EventListener butuh **`interceptors`** (namespaced, di `Role`) **dan**
+  `clusterinterceptors` (di `ClusterRole`). Kurang salah satu → pod tidak pernah Ready.
 
 ## Yang perlu diperhatikan
 

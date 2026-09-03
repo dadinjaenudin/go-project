@@ -1,0 +1,85 @@
+# ==========================================================================
+# EventListener: pod yang menunggu HTTP request dan membuat PipelineRun.
+#
+# Alur satu event:
+#   POST /  ->  interceptor github  (tanda tangan sah? event push?)
+#           ->  interceptor cel     (branch main? potong nama branch)
+#           ->  TriggerBinding      (ambil url + branch dari payload)
+#           ->  TriggerTemplate     (cetak PipelineRun)
+#
+# Interceptor adalah SARINGAN. Tanpa itu, siapa pun yang bisa menjangkau
+# port ini bisa menjalankan pipeline Anda kapan saja.
+# ==========================================================================
+
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+
+metadata:
+  name: employee-push-listener
+  namespace: cicd
+
+spec:
+  serviceAccountName: tekton-triggers-sa
+
+  triggers:
+    - name: github-push-main
+
+      interceptors:
+        # --- Saringan 1: keaslian dan jenis event ---
+        - ref:
+            name: github
+            kind: ClusterInterceptor
+          params:
+            # Memverifikasi header X-Hub-Signature-256 (HMAC-SHA256 dari body
+            # memakai token bersama). Request tanpa tanda tangan yang cocok
+            # ditolak dengan 401 -- ini yang mencegah orang lain memicu
+            # pipeline Anda.
+            - name: secretRef
+              value:
+                secretName: github-webhook-secret
+                secretKey: secretToken
+
+            # Hanya event push. Event lain (issue, star, fork) diabaikan.
+            - name: eventTypes
+              value: ["push"]
+
+        # --- Saringan 2: branch, sekaligus memotong nama branch ---
+        - ref:
+            name: cel
+            kind: ClusterInterceptor
+          params:
+            # Hanya push ke main yang diteruskan. Push ke branch lain berhenti
+            # di sini -- pipeline ini men-deploy ke namespace dev, jadi tidak
+            # semestinya dijalankan oleh sembarang branch.
+            - name: filter
+              value: "body.ref == 'refs/heads/main'"
+
+            # TriggerBinding hanya bisa mengambil nilai apa adanya, tidak bisa
+            # mengolah string. Pemotongan "refs/heads/main" -> "main"
+            # dikerjakan di sini, hasilnya tersedia sebagai
+            # $(extensions.branch_name).
+            - name: overlays
+              value:
+                - key: branch_name
+                  expression: "body.ref.split('/')[2]"
+
+      bindings:
+        - ref: github-push-binding
+
+      template:
+        ref: employee-ci-cd-template
+
+  resources:
+    kubernetesResource:
+      spec:
+        template:
+          spec:
+            serviceAccountName: tekton-triggers-sa
+            containers:
+              - resources:
+                  requests:
+                    cpu: "50m"
+                    memory: "64Mi"
+                  limits:
+                    cpu: "300m"
+                    memory: "256Mi"

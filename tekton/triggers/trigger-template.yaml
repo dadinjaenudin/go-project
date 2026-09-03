@@ -1,0 +1,81 @@
+# ==========================================================================
+# TriggerTemplate: CETAKAN PipelineRun.
+#
+# Isinya sama persis dengan tekton/pipelinerun.yaml, bedanya repo-url dan
+# revision datang dari parameter, bukan ditulis tetap. Setiap event yang
+# lolos interceptor menghasilkan satu PipelineRun dari cetakan ini.
+# ==========================================================================
+
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+
+metadata:
+  name: employee-ci-cd-template
+  namespace: cicd
+
+spec:
+  params:
+    - name: git-repo-url
+      description: URL repo yang di-clone
+
+    - name: git-revision
+      description: Nama branch (bukan SHA -- lihat catatan di trigger-binding.yaml)
+      default: main
+
+    - name: git-commit
+      description: SHA commit, dipakai sebagai label untuk penelusuran
+      default: unknown
+
+    - name: git-pusher
+      description: Siapa yang melakukan push
+      default: unknown
+
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+
+      metadata:
+        generateName: employee-ci-cd-auto-
+
+        # Label memudahkan penelusuran: run mana berasal dari commit mana,
+        # dan mana yang otomatis vs manual.
+        #   kubectl get pipelinerun -n cicd -l trigger=github-push
+        labels:
+          trigger: github-push
+          git-commit: $(tt.params.git-commit)
+          git-pusher: $(tt.params.git-pusher)
+
+      spec:
+        pipelineRef:
+          name: employee-ci-cd
+
+        taskRunTemplate:
+          serviceAccountName: tekton-deployer
+
+        timeouts:
+          pipeline: "1h"
+
+        params:
+          - name: repo-url
+            value: $(tt.params.git-repo-url)
+
+          - name: revision
+            value: $(tt.params.git-revision)
+
+          - name: backend-image
+            value: dadin/go-backend
+
+          - name: frontend-image
+            value: dadin/go-frontend
+
+          - name: deploy-namespace
+            value: dev
+
+        workspaces:
+          - name: shared-workspace
+            volumeClaimTemplate:
+              spec:
+                accessModes: [ReadWriteOnce]
+                resources:
+                  requests:
+                    storage: 5Gi

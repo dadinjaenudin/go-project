@@ -17,6 +17,7 @@ Baca berurutan. Tiap bab menganggap Anda sudah paham bab sebelumnya.
 | 5 | [05-troubleshooting.md](05-troubleshooting.md) | 9 error nyata dari project ini + cara mendiagnosanya | rujukan |
 | 6 | [06-cheatsheet.md](06-cheatsheet.md) | Perintah harian | rujukan |
 | 7 | [07-latihan.md](07-latihan.md) | Latihan bertahap untuk memastikan Anda paham | ~2 jam |
+| 8 | [08-auto-trigger.md](08-auto-trigger.md) | Pipeline jalan otomatis tiap `git push` (Tekton Triggers + git hook) | ~40 menit |
 
 ## Peta besar dalam satu gambar
 
@@ -32,6 +33,8 @@ Baca berurutan. Tiap bab menganggap Anda sudah paham bab sebelumnya.
        ▼                              ▼
   kubectl create -f  ──────►  ┌───────────────────┐
   pipelinerun.yaml            │   TEKTON          │
+  (atau otomatis dari         │                   │
+   git push — lihat bab 8)    │                   │
                               │   namespace cicd  │
                               │                   │
                               │ (2) test backend  │

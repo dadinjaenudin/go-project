@@ -1,0 +1,47 @@
+# ==========================================================================
+# TriggerBinding: MENGAMBIL nilai dari payload webhook.
+#
+# GitHub mengirim JSON besar saat ada push. Yang kita butuhkan cuma dua:
+# URL repo dan nama branch. TriggerBinding-lah yang memetakannya jadi
+# parameter, untuk diteruskan ke TriggerTemplate.
+#
+# Payload push GitHub (disederhanakan):
+#   {
+#     "ref": "refs/heads/main",
+#     "after": "23c7bbf5b1...",
+#     "repository": { "clone_url": "https://github.com/user/repo.git" },
+#     "head_commit": { "id": "...", "message": "..." },
+#     "pusher": { "name": "dadinjaenudin" }
+#   }
+# ==========================================================================
+
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+
+metadata:
+  name: github-push-binding
+  namespace: cicd
+
+spec:
+  params:
+    - name: git-repo-url
+      value: $(body.repository.clone_url)
+
+    # PENTING: yang dikirim adalah NAMA BRANCH, bukan commit SHA.
+    # Task git-clone memakai "git clone --branch <x>", dan opsi itu hanya
+    # menerima nama branch/tag -- diberi SHA akan gagal dengan
+    # "Remote branch <sha> not found in upstream origin".
+    #
+    # body.ref berisi "refs/heads/main", jadi harus dipotong dulu. Pemotongan
+    # itu dikerjakan interceptor CEL di event-listener.yaml, hasilnya masuk
+    # ke $(extensions.branch_name).
+    - name: git-revision
+      value: $(extensions.branch_name)
+
+    # Dua nilai berikut tidak dipakai pipeline, hanya untuk jejak audit
+    # supaya terlihat di label PipelineRun: siapa yang push, commit apa.
+    - name: git-commit
+      value: $(body.after)
+
+    - name: git-pusher
+      value: $(body.pusher.name)

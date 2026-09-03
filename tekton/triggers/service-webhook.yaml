@@ -1,0 +1,39 @@
+# ==========================================================================
+# Mengekspos EventListener ke Windows.
+#
+# Tekton otomatis membuat Service "el-employee-push-listener" bertipe
+# ClusterIP -- hanya bisa dijangkau dari dalam cluster. Service tambahan ini
+# yang membuatnya bisa dipanggil dari laptop.
+#
+# Kenapa LoadBalancer, bukan NodePort: di Kubernetes bawaan Docker Desktop,
+# NodePort TIDAK diteruskan ke localhost. Lihat docs/05-troubleshooting.md #6.
+#
+# Port 8095 dipilih karena 8080 sudah dipakai proses lain di mesin ini.
+# Kalau bentrok, ganti "port" di bawah lalu HAPUS dan buat ulang Service-nya
+# (mengubah port pada LoadBalancer yang sudah ada tidak mem-bind ulang --
+# lihat docs/05-troubleshooting.md #7):
+#
+#   kubectl delete svc -n cicd el-webhook
+#   kubectl apply -f tekton/triggers/service-webhook.yaml
+# ==========================================================================
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: el-webhook
+  namespace: cicd
+  labels:
+    app: el-webhook
+
+spec:
+  type: LoadBalancer
+
+  # Menunjuk pod EventListener lewat label yang dipasang Tekton sendiri.
+  selector:
+    eventlistener: employee-push-listener
+
+  ports:
+    - name: http
+      port: 8095
+      targetPort: 8080

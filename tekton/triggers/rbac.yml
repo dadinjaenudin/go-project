@@ -1,0 +1,113 @@
+# ==========================================================================
+# Izin untuk EventListener.
+#
+# EventListener adalah pod yang menunggu HTTP request. Saat request masuk dan
+# lolos interceptor, ia MEMBUAT PipelineRun. Karena itu ia butuh identitas dan
+# izin sendiri -- terpisah dari tekton-deployer yang dipakai task deploy.
+#
+# Dua lapis izin:
+#   Role         (namespace cicd)  -> baca trigger, buat PipelineRun
+#   ClusterRole  (cluster-wide)    -> baca ClusterInterceptor (github, cel)
+#
+# ClusterRole di sini hanya BACA objek milik Tekton sendiri, tidak bisa
+# menyentuh workload apa pun.
+# ==========================================================================
+
+apiVersion: v1
+kind: ServiceAccount
+
+metadata:
+  name: tekton-triggers-sa
+  namespace: cicd
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+
+metadata:
+  name: tekton-triggers-role
+  namespace: cicd
+
+rules:
+  # Membaca definisi trigger miliknya sendiri.
+  #
+  # "interceptors" (namespaced) WAJIB ada di sini. Ini berbeda dari
+  # "clusterinterceptors" di ClusterRole bawah -- keduanya diperlukan.
+  # Tanpa ini, pod EventListener gagal start dengan:
+  #   interceptors.triggers.tekton.dev is forbidden: ... cannot list resource
+  - apiGroups: ["triggers.tekton.dev"]
+    resources:
+      - eventlisteners
+      - triggerbindings
+      - triggertemplates
+      - triggers
+      - interceptors
+    verbs: ["get", "list", "watch"]
+
+  # Inti tugasnya: membuat PipelineRun saat event masuk.
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns"]
+    verbs: ["create", "get", "list", "watch"]
+
+  # Membaca Secret berisi token webhook untuk verifikasi tanda tangan.
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets", "serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+
+  # Mencatat event (muncul di "kubectl describe eventlistener").
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+
+metadata:
+  name: tekton-triggers-binding
+  namespace: cicd
+
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tekton-triggers-role
+
+subjects:
+  - kind: ServiceAccount
+    name: tekton-triggers-sa
+    namespace: cicd
+
+---
+# ClusterInterceptor (github, cel) adalah objek cluster-scoped, jadi izinnya
+# harus ClusterRole -- Role namespaced tidak bisa menjangkaunya.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+
+metadata:
+  name: tekton-triggers-clusterrole
+
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["clustertriggerbindings", "clusterinterceptors"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+
+metadata:
+  name: tekton-triggers-clusterbinding
+
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-clusterrole
+
+subjects:
+  - kind: ServiceAccount
+    name: tekton-triggers-sa
+    namespace: cicd
